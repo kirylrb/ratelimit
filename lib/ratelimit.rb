@@ -1,36 +1,38 @@
+# frozen_string_literal: true
+
 require 'redis'
-require 'redis-namespace'
 
 class Ratelimit
-  COUNT_LUA_SCRIPT = <<-LUA.freeze
-    local subject = KEYS[1]
-    local oldest_bucket = tonumber(ARGV[1])
-    local current_bucket = tonumber(ARGV[2])
-    local count = 0
+# =======
+#   COUNT_LUA_SCRIPT = <<-LUA.freeze
+#     local subject = KEYS[1]
+#     local oldest_bucket = tonumber(ARGV[1])
+#     local current_bucket = tonumber(ARGV[2])
+#     local count = 0
 
-    for bucket = oldest_bucket + 1, current_bucket do
-      local value = redis.call('HGET', subject, tostring(bucket))
-      if value then
-        count = count + tonumber(value)
-      end
-    end
+#     for bucket = oldest_bucket + 1, current_bucket do
+#       local value = redis.call('HGET', subject, tostring(bucket))
+#       if value then
+#         count = count + tonumber(value)
+#       end
+#     end
 
-    return count
-  LUA
+#     return count
+#   LUA
 
-  MAINTENANCE_LUA_SCRIPT = <<-LUA.freeze
-    local subject = KEYS[1]
-    local oldest_bucket = tonumber(ARGV[1])
+#   MAINTENANCE_LUA_SCRIPT = <<-LUA.freeze
+#     local subject = KEYS[1]
+#     local oldest_bucket = tonumber(ARGV[1])
 
-    -- Delete expired keys
-    local all_keys = redis.call('HKEYS', subject)
-    for _, key in ipairs(all_keys) do
-      local bucket_key = tonumber(key)
-      if bucket_key < oldest_bucket then
-        redis.call('HDEL', subject, tostring(bucket_key))
-      end
-    end
-  LUA
+#     -- Delete expired keys
+#     local all_keys = redis.call('HKEYS', subject)
+#     for _, key in ipairs(all_keys) do
+#       local bucket_key = tonumber(key)
+#       if bucket_key < oldest_bucket then
+#         redis.call('HDEL', subject, tostring(bucket_key))
+#       end
+#     end
+#   LUA
 
   # Create a Ratelimit object.
   #
@@ -42,22 +44,23 @@ class Ratelimit
   # @option options [Redis]   :redis (nil) Redis client if you need to customize connection options
   #
   # @return [Ratelimit] Ratelimit instance
-  #
   def initialize(key, options = {})
     @key = key
     unless options.is_a?(Hash)
-      raise ArgumentError.new("Redis object is now passed in via the options hash - options[:redis]")
+      raise ArgumentError, 'Redis object is now passed in via the options hash - options[:redis]'
     end
+
     @bucket_span = options[:bucket_span] || 600
     @bucket_interval = options[:bucket_interval] || 5
+
     @bucket_expiry = options[:bucket_expiry] || @bucket_span
     if @bucket_expiry > @bucket_span
-      raise ArgumentError.new("Bucket expiry cannot be larger than the bucket span")
+      raise ArgumentError, 'Bucket expiry cannot be larger than the bucket span'
     end
+
     @bucket_count = (@bucket_span / @bucket_interval).round
-    if @bucket_count < 3
-      raise ArgumentError.new("Cannot have less than 3 buckets")
-    end
+    raise ArgumentError, 'Cannot have less than 3 buckets' if @bucket_count < 3
+
     @raw_redis = options[:redis]
     load_scripts
   end
@@ -70,14 +73,20 @@ class Ratelimit
   # @return [Integer] The counter value
   def add(subject, count = 1)
     bucket = get_bucket
-    subject = "#{@key}:#{subject}"
+    subject = subject_key(subject)
+    redis.multi do
+      redis.hincrby(subject, bucket, count)
+      redis.hdel(subject, (bucket + 1) % @bucket_count)
+      redis.hdel(subject, (bucket + 2) % @bucket_count)
+      redis.expire(subject, @bucket_expiry)
+#     subject = "#{@key}:#{subject}"
 
-    # Cleanup expired keys every 100th request
-    cleanup_expired_keys(subject) if rand < 0.01
+#     # Cleanup expired keys every 100th request
+#     cleanup_expired_keys(subject) if rand < 0.01
 
-    redis.multi do |transaction|
-      transaction.hincrby(subject, bucket, count)
-      transaction.expire(subject, @bucket_expiry + @bucket_interval)
+#     redis.multi do |transaction|
+#       transaction.hincrby(subject, bucket, count)
+#       transaction.expire(subject, @bucket_expiry + @bucket_interval)
     end.first
   end
 
@@ -87,11 +96,21 @@ class Ratelimit
   # @param [Integer] interval How far back (in seconds) to retrieve activity.
   def count(subject, interval)
     interval = [[interval, @bucket_interval].max, @bucket_span].min
-    oldest_bucket = get_bucket(Time.now.to_i - interval)
-    current_bucket = get_bucket
-    subject = "#{@key}:#{subject}"
+    count = (interval / @bucket_interval).floor
+    subject = subject_key(subject)
 
-    execute_script(@count_script_sha, [subject], [oldest_bucket, current_bucket])
+    keys = (0..count - 1).map do |i|
+      (bucket - i) % @bucket_count
+    end
+
+    redis.hmget(subject, *keys).inject(0) { |a, i| a + i.to_i }
+# =======
+#     oldest_bucket = get_bucket(Time.now.to_i - interval)
+#     current_bucket = get_bucket
+#     subject = "#{@key}:#{subject}"
+
+#     execute_script(@count_script_sha, [subject], [oldest_bucket, current_bucket])
+# >>>>>>> master
   end
 
   # Check if the rate limit has been exceeded.
@@ -101,7 +120,7 @@ class Ratelimit
   # @option options [Integer] :interval How far back to retrieve activity.
   # @option options [Integer] :threshold Maximum number of actions
   def exceeded?(subject, options = {})
-    return count(subject, options[:interval]) >= options[:threshold]
+    count(subject, options[:interval]) >= options[:threshold]
   end
 
   # Check if the rate limit is within bounds
@@ -166,7 +185,11 @@ class Ratelimit
     @maintenance_script_sha = redis.redis.script(:load, MAINTENANCE_LUA_SCRIPT)
   end
 
+  def subject_key(subject)
+    "ratelimit:#{@key}:#{subject}"
+  end
+
   def redis
-    @redis ||= Redis::Namespace.new(:ratelimit, redis: @raw_redis || Redis.new)
+    @redis ||= @raw_redis || Redis.new
   end
 end
