@@ -1,7 +1,6 @@
 # Ratelimit: Slow your roll
 
-[![Build Status](https://secure.travis-ci.org/ejfinneran/ratelimit.svg?branch=master)](http://travis-ci.org/ejfinneran/ratelimit)
-[![Code Climate](https://img.shields.io/codeclimate/github/ejfinneran/ratelimit.svg)](https://codeclimate.com/github/ejfinneran/ratelimit)
+[![Code Climate](https://codeclimate.com/github/ejfinneran/ratelimit.png)](https://codeclimate.com/github/ejfinneran/ratelimit)
 [![Coverage Status](https://img.shields.io/coveralls/ejfinneran/ratelimit.svg)](https://coveralls.io/r/ejfinneran/ratelimit)
 
 Ratelimit provides a way to rate limit actions across multiple servers using Redis.  This is a port of RateLimit.js found [here](https://github.com/chriso/redback/blob/master/lib/advanced_structures/RateLimit.js) and inspired by [this post](https://gist.github.com/chriso/54dd46b03155fcf555adccea822193da).
@@ -60,6 +59,18 @@ ratelimit.exec_within_threshold phone_number, threshold: 10, interval: 30 do
   some_rate_limited_code
   ratelimit.add(phone_number)
 end
+```
+
+### Connecting to an external Redis instance
+
+By default, Ratelimit will try to connect to a Redis server on `127.0.0.1:6379` and this works great when you have everything in one place. However, when you have a separate Redis server, you will need to make a few changes to specify its location.
+
+To do so, instantiate a redis client pointing to the right server (if you don't have one instance already) and pass it in the constructor.
+
+``` rb
+redis = Redis.new(host: "10.0.1.1", port: 6380, db: 15)
+...
+ratelimit = Ratelimit.new("messages", redis: redis)
 ```
 
 ## Documentation

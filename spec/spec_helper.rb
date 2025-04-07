@@ -3,7 +3,7 @@
 require 'coveralls'
 Coveralls.wear!
 
-require 'fakeredis'
+# require 'fakeredis'
 require 'timecop'
 require 'ratelimit'
 

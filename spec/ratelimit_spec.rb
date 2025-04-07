@@ -3,6 +3,29 @@
 require 'spec_helper'
 
 describe Ratelimit do
+# <<<<<<< master2
+# =======
+#   describe '.initialize' do
+#     subject { described_class.new(key, options) }
+
+#     let(:options) { Hash.new }
+
+#     context 'with key' do
+#       let(:key) { 'key' }
+
+#       context 'with redis option' do
+#         let(:redis) { double('redis') }
+#         let(:options) { super().merge(redis: redis) }
+
+#         it 'wraps redis in redis-namespace' do
+#           expect(redis).to receive(:script).with(:load, anything).twice
+#           expect(subject.send(:redis)).to be_instance_of(Redis::Namespace)
+#         end
+#       end
+#     end
+#   end
+
+# >>>>>>> master
   before do
     @r = Ratelimit.new('key')
     @r.send(:redis).flushdb
@@ -104,8 +127,13 @@ describe Ratelimit do
     expect(@value).to be 1
   end
 
+# <<<<<<< master2
   it 'counts correctly if bucket_span equals count-interval  ' do
     @r = Ratelimit.new('key', bucket_span: 10, bucket_interval: 1)
+# =======
+#   it "counts correctly if bucket_span equals count-interval  " do
+#     @r = Ratelimit.new("key", {:bucket_span => 10, bucket_interval: 1})
+# >>>>>>> master
     @r.add('value1')
 
     expect(@r.count('value1', 10)).to eql(1)
